@@ -22,7 +22,18 @@ if (isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['id'])
     exit();
 }
 
-// --- INSERT TASK ---
+// --- CLEAR ALL COMPLETED TASKS ---
+if (isset($_GET['action']) && $_GET['action'] === 'clear_completed') {
+    try {
+        $stmt = $pdo->prepare("DELETE FROM task_tbl WHERE is_completed = 1");
+        $stmt->execute();
+        header("Location: ../tasks.php?msg=tasks_cleared");
+    } catch (PDOException $e) {
+        header("Location: ../tasks.php?error=clear_failed");
+    }
+    exit();
+}
+
 // --- INSERT TASK ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_task'])) {
     $title = trim($_POST['title'] ?? '');

@@ -1,0 +1,142 @@
+<?php
+session_start();
+// Path to config and dompdf from admin/modules/
+require_once '../../config/config.php';
+require_once '../libs/dompdf/autoload.inc.php'; 
+
+use Dompdf\Dompdf;
+use Dompdf\Options;
+
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'ADMIN') {
+    die("Unauthorized access.");
+}
+
+// 1. Capture All Filters
+$start_date = $_GET['start_date'] ?? '';
+$end_date   = $_GET['end_date'] ?? '';
+$status_val = $_GET['status'] ?? 'all';
+$user_id    = $_GET['user_id'] ?? 'all';
+
+$params = [];
+$filters = "";
+$meta_info = [];
+
+// Date Filtering
+if (!empty($start_date) && !empty($end_date)) {
+    $filters .= " AND t.created_at BETWEEN :start AND :end ";
+    $params[':start'] = $start_date . " 00:00:00";
+    $params[':end']   = $end_date . " 23:59:59";
+    $meta_info[] = "Range: " . date('M d, Y', strtotime($start_date)) . " - " . date('M d, Y', strtotime($end_date));
+}
+
+// Status Filtering
+if ($status_val !== 'all') {
+    $is_done = ($status_val === 'completed') ? 1 : 0;
+    $filters .= " AND t.is_completed = :is_done ";
+    $params[':is_done'] = $is_done;
+    $meta_info[] = "Status: " . ucfirst($status_val);
+}
+
+// User Filtering - Updated to 'users_tbl' and 'username'
+if ($user_id !== 'all') {
+    $u_stmt = $pdo->prepare("SELECT username FROM users_tbl WHERE id = ?");
+    $u_stmt->execute([$user_id]);
+    $u_name = $u_stmt->fetchColumn();
+    
+    $filters .= " AND t.assigned_to = :user_id ";
+    $params[':user_id'] = $user_id;
+    $meta_info[] = "Member: " . ($u_name ?: 'Unknown');
+}
+
+$subtitle = !empty($meta_info) ? implode(" | ", $meta_info) : "Complete System Overview";
+
+// 2. Fetch Data
+try {
+    $query = "SELECT 
+                p.name as project_name, 
+                COUNT(t.id) as total_tasks,
+                SUM(CASE WHEN t.is_completed = 1 THEN 1 ELSE 0 END) as done
+              FROM project_tbl p 
+              LEFT JOIN task_tbl t ON p.id = t.project_id $filters
+              GROUP BY p.id 
+              ORDER BY p.name ASC";
+
+    $stmt = $pdo->prepare($query);
+    $stmt->execute($params);
+    $reports = $stmt->fetchAll();
+} catch (PDOException $e) {
+    die("Export Error: " . $e->getMessage());
+}
+
+// 3. Dompdf Configuration
+$options = new Options();
+$options->set('isRemoteEnabled', true);
+$dompdf = new Dompdf($options);
+
+$html = '
+<style>
+    body { font-family: "Helvetica", sans-serif; color: #334155; }
+    .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 15px; margin-bottom: 25px; }
+    .header h1 { margin: 0; font-size: 20px; color: #0f172a; text-transform: uppercase; }
+    .header p { margin: 5px 0; font-size: 11px; color: #64748b; font-weight: bold; }
+    
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th { background: #f8fafc; padding: 12px 10px; border: 1px solid #e2e8f0; font-size: 10px; text-transform: uppercase; color: #475569; text-align: left; }
+    td { padding: 12px 10px; border: 1px solid #e2e8f0; font-size: 12px; }
+    
+    .text-center { text-align: center; }
+    .text-right { text-align: right; }
+    .totals-row { background: #f1f5f9; font-weight: bold; }
+    .footer { position: fixed; bottom: -20px; width: 100%; font-size: 9px; text-align: center; color: #94a3b8; }
+</style>
+
+<div class="header">
+    <h1>Project Progress Report</h1>
+    <p>' . $subtitle . '</p>
+    <p style="font-weight: normal; font-size: 9px;">Generated: ' . date('Y-m-d H:i') . '</p>
+</div>
+
+<table>
+    <thead>
+        <tr>
+            <th>Project Name</th>
+            <th class="text-center">Total Tasks</th>
+            <th class="text-center">Completed</th>
+            <th class="text-right">Rate</th>
+        </tr>
+    </thead>
+    <tbody>';
+
+if (empty($reports)) {
+    $html .= '<tr><td colspan="4" class="text-center" style="padding: 40px;">No records match your selected filters.</td></tr>';
+} else {
+    $g_tasks = 0; $g_done = 0;
+    foreach ($reports as $row) {
+        $percent = ($row['total_tasks'] > 0) ? round(($row['done'] / $row['total_tasks']) * 100) : 0;
+        $g_tasks += $row['total_tasks'];
+        $g_done += $row['done'];
+        
+        $html .= '<tr>
+            <td style="font-weight: bold;">' . htmlspecialchars($row['project_name']) . '</td>
+            <td class="text-center">' . $row['total_tasks'] . '</td>
+            <td class="text-center">' . $row['done'] . '</td>
+            <td class="text-right" style="color: #2563eb; font-weight: bold;">' . $percent . '%</td>
+        </tr>';
+    }
+    
+    $g_percent = ($g_tasks > 0) ? round(($g_done / $g_tasks) * 100) : 0;
+    $html .= '<tr class="totals-row">
+        <td>SYSTEM TOTALS</td>
+        <td class="text-center">' . $g_tasks . '</td>
+        <td class="text-center">' . $g_done . '</td>
+        <td class="text-right" style="background: #0f172a; color: white;">' . $g_percent . '%</td>
+    </tr>';
+}
+
+$html .= '</tbody></table>
+<div class="footer">Confidential | Generated by Admin (' . $_SESSION['user_id'] . ')</div>';
+
+$dompdf->loadHtml($html);
+$dompdf->setPaper('A4', 'portrait');
+$dompdf->render();
+$dompdf->stream("TMS_Report_" . date('Y-m-d') . ".pdf", ["Attachment" => true]);
