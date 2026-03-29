@@ -70,10 +70,10 @@ try {
 <body class="bg-slate-50 font-sans antialiased">
 
     <div class="flex h-screen overflow-hidden">
-        <?php include '../includes/sidebar.php'; ?>
+        <?php include '../admin/includes/sidebar.php'; ?>
 
         <main class="flex-1 flex flex-col overflow-y-auto">
-            <?php include '../includes/header.php'; ?>
+            <?php include '../admin/includes/header.php'; ?>
 
             <div class="p-8 max-w-7xl mx-auto w-full">
                 
@@ -176,7 +176,7 @@ try {
                 </div>
             </div>
 
-            <?php include '../includes/footer.php'; ?>
+            <?php include '../admin/includes/footer.php'; ?>
         </main>
     </div>
 </body>

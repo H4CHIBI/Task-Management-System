@@ -46,11 +46,11 @@ try {
 
     <div class="flex h-screen overflow-hidden">
         
-        <?php include '../includes/sidebar.php'; ?>
+        <?php include '../admin/includes/sidebar.php'; ?>
 
         <main class="flex-1 flex flex-col min-w-0 bg-slate-50 overflow-hidden">
             
-            <?php include '../includes/header.php'; ?>
+            <?php include '../admin/includes/header.php'; ?>
 
             <div class="flex-1 overflow-y-auto p-6 lg:p-10">
                 <div class="max-w-7xl mx-auto">
@@ -150,7 +150,7 @@ try {
                 </div>
             </div>
 
-            <?php include '../includes/footer.php'; ?>
+            <?php include '../admin/includes/footer.php'; ?>
         </main>
     </div>
 

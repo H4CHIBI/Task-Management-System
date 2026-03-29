@@ -23,6 +23,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['username'] = $user['username'];
             $_SESSION['role'] = $user['role'];
+            $_SESSION['profile_image'] = $user['profile_image'] ?? 'default_profile.png';
 
             // 2. Redirect path (assuming dashboard is in public/admin/)
             header("Location: ../admin/dashboard.php");

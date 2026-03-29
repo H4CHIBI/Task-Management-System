@@ -2,62 +2,71 @@
 session_start();
 require_once '../../config/config.php';
 
-// Security Check: Only Admins allowed
+// Security: Ensure only logged-in Admins can process these actions
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'ADMIN') {
     header("Location: ../../index.php?error=unauthorized");
     exit();
 }
 
-// --- DELETE TASK ---
-if (isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['id'])) {
-    $id = $_GET['id'];
-    
-    try {
-        $stmt = $pdo->prepare("DELETE FROM task_tbl WHERE id = ?");
-        $stmt->execute([$id]);
-        header("Location: ../tasks.php?msg=task_deleted");
-    } catch (PDOException $e) {
-        header("Location: ../tasks.php?error=delete_failed");
-    }
-    exit();
-}
+$action = $_POST['action'] ?? $_GET['action'] ?? '';
 
-// --- CLEAR ALL COMPLETED TASKS ---
-if (isset($_GET['action']) && $_GET['action'] === 'clear_completed') {
-    try {
-        $stmt = $pdo->prepare("DELETE FROM task_tbl WHERE is_completed = 1");
-        $stmt->execute();
-        header("Location: ../tasks.php?msg=tasks_cleared");
-    } catch (PDOException $e) {
-        header("Location: ../tasks.php?error=clear_failed");
-    }
-    exit();
-}
+try {
+    switch ($action) {
+        case 'add_task':
+            $title = $_POST['title'];
+            $project_id = $_POST['project_id'];
+            $priority = $_POST['priority'];
+            $assigned_to = $_POST['assigned_to'];
 
-// --- INSERT TASK ---
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_task'])) {
-    $title = trim($_POST['title'] ?? '');
-    $project_id = $_POST['project_id'] ?? null;
-    $priority = $_POST['priority'] ?? 2; // Default to Medium (2)
-    $status = 'Pending'; // Default status string
-    $is_completed = 0;   // Default to not completed
-
-    if (!empty($title) && !empty($project_id)) {
-        try {
-            // Correctly mapping to your task_tbl columns
-            $sql = "INSERT INTO task_tbl (project_id, title, status, priority, is_completed) 
-                    VALUES (?, ?, ?, ?, ?)";
+            // We initialize is_completed to 0 for all new tasks
+            $sql = "INSERT INTO task_tbl (title, project_id, priority, assigned_to, is_completed, created_at) 
+                    VALUES (?, ?, ?, ?, 0, NOW())";
             $stmt = $pdo->prepare($sql);
-            $stmt->execute([$project_id, $title, $status, $priority, $is_completed]);
-            
+            $stmt->execute([$title, $project_id, $priority, $assigned_to]);
+
             header("Location: ../tasks.php?msg=task_added");
-        } catch (PDOException $e) {
-            // Log the error for debugging: error_log($e->getMessage());
-            header("Location: ../tasks.php?error=failed");
-        }
+            break;
+
+        case 'update_task':
+            $task_id = $_POST['task_id'];
+            $title = $_POST['title'];
+            $project_id = $_POST['project_id'];
+            $priority = $_POST['priority'];
+            $assigned_to = $_POST['assigned_to'];
+
+            // Update only the metadata. We don't touch is_completed here 
+            // because that is handled by the AJAX/checkmark toggle.
+            $sql = "UPDATE task_tbl SET 
+                    title = ?, 
+                    project_id = ?, 
+                    priority = ?, 
+                    assigned_to = ? 
+                    WHERE id = ?";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$title, $project_id, $priority, $assigned_to, $task_id]);
+
+            header("Location: ../tasks.php?msg=task_updated");
+            break;
+
+        case 'delete':
+            $task_id = $_GET['id'] ?? null;
+
+            if ($task_id) {
+                $stmt = $pdo->prepare("DELETE FROM task_tbl WHERE id = ?");
+                $stmt->execute([$task_id]);
+                header("Location: ../tasks.php?msg=task_deleted");
+            } else {
+                header("Location: ../tasks.php?error=invalid_id");
+            }
+            break;
+
+        default:
+            header("Location: ../tasks.php");
+            break;
     }
-    exit();
+} catch (PDOException $e) {
+    // Log error and redirect with error message
+    error_log($e->getMessage());
+    header("Location: ../tasks.php?error=db_error");
 }
-// If accessed directly without action
-header("Location: ../tasks.php");
 exit();

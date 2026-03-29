@@ -6,162 +6,165 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'ADMIN') {
 }
 require_once '../config/config.php';
 
-$filter = $_GET['priority_filter'] ?? 'all';
+// Get filters from URL
+$priority_filter = $_GET['priority_filter'] ?? 'all';
+$user_filter = $_GET['user_filter'] ?? 'all'; // New User Filter
 
 try {
-    // 1. Fetch tasks with project names
-    $query = "SELECT t.*, p.name as project_name 
+    // 1. Base Query
+    $query = "SELECT t.*, p.name as project_name, u.username as assigned_user 
               FROM task_tbl t 
-              LEFT JOIN project_tbl p ON t.project_id = p.id";
+              LEFT JOIN project_tbl p ON t.project_id = p.id
+              LEFT JOIN users_tbl u ON t.assigned_to = u.id
+              WHERE t.is_completed = 0"; 
     
-    if ($filter !== 'all') {
-        $query .= " WHERE t.priority = :priority";
+    // 2. Apply Priority Filter
+    if ($priority_filter !== 'all') {
+        $query .= " AND t.priority = :priority";
+    }
+
+    // 3. Apply User Filter
+    if ($user_filter !== 'all') {
+        $query .= " AND t.assigned_to = :user_id";
     }
     
     $query .= " ORDER BY t.id DESC";
     
     $stmt = $pdo->prepare($query);
-    if ($filter !== 'all') {
-        $stmt->bindValue(':priority', $filter, PDO::PARAM_INT);
+
+    if ($priority_filter !== 'all') {
+        $stmt->bindValue(':priority', $priority_filter, PDO::PARAM_INT);
     }
+    if ($user_filter !== 'all') {
+        $stmt->bindValue(':user_id', $user_filter, PDO::PARAM_INT);
+    }
+
     $stmt->execute();
     $tasks = $stmt->fetchAll();
 
-    // 2. Fetch projects for the dropdown
-    $projects = $pdo->query("SELECT id, name FROM project_tbl")->fetchAll();
-
-    // 3. Calculate Progress Stats
-    $totalTasks = count($tasks);
-    $completedTasks = count(array_filter($tasks, fn($t) => $t['is_completed'] == 1));
-    $percent = ($totalTasks > 0) ? round(($completedTasks / $totalTasks) * 100) : 0;
+    // Data for dropdowns
+    $projects = $pdo->query("SELECT id, name FROM project_tbl ORDER BY name ASC")->fetchAll();
+    $users = $pdo->query("SELECT id, username FROM users_tbl ORDER BY username ASC")->fetchAll();
 
 } catch (PDOException $e) {
-    die("Error: " . $e->getMessage());
+    die("Database Error: " . $e->getMessage());
 }
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Manage Tasks - TMS</title>
+    <title>Active Tasks - TMS</title>
     <link rel="stylesheet" href="../public/css/output.css">
     <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <style>[x-cloak] { display: none !important; }</style>
 </head>
-<body class="bg-gray-50 font-sans antialiased" x-data="{ openTaskModal: false }">
+<body class="bg-slate-50 antialiased" 
+      x-data="{ 
+        openTaskModal: false, 
+        isEdit: false,
+        formData: { id: '', title: '', project_id: '', priority: 2, assigned_to: '' }
+      }">
 
     <div class="flex h-screen overflow-hidden">
-        <?php include '../includes/sidebar.php'; ?>
+        <?php include '../admin/includes/sidebar.php'; ?>
 
         <main class="flex-1 flex flex-col overflow-y-auto">
-            <?php include '../includes/header.php'; ?>
+            <?php include '../admin/includes/header.php'; ?>
 
-            <div class="p-6 max-w-7xl mx-auto w-full">
+            <div class="p-8 max-w-7xl mx-auto w-full">
                 
-                <?php if (isset($_GET['msg'])): ?>
-                    <div class="mb-6 p-4 bg-emerald-50 text-emerald-700 rounded-xl font-bold border border-emerald-100 shadow-sm flex items-center gap-2">
-                        <span><?php 
-                            if($_GET['msg'] == 'task_added') echo "✅ Task successfully assigned!";
-                            if($_GET['msg'] == 'task_deleted') echo "🗑️ Task removed from system.";
-                            if($_GET['msg'] == 'tasks_cleared') echo "🧹 All completed tasks have been cleared.";
-                        ?></span>
-                    </div>
-                <?php endif; ?>
-
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                    <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-                        <p class="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">Overall Completion</p>
-                        <div class="flex items-end gap-2">
-                            <span class="text-3xl font-black text-slate-800"><?php echo $percent; ?>%</span>
-                            <span class="text-xs text-slate-500 mb-1.5"><?php echo $completedTasks; ?> / <?php echo $totalTasks; ?> Tasks</span>
-                        </div>
-                        <div class="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden">
-                            <div class="bg-blue-600 h-full transition-all duration-500" style="width: <?php echo $percent; ?>%"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+                <div class="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
                     <div>
-                        <h1 class="text-3xl font-black text-slate-800 tracking-tight">Task Management</h1>
-                        <p class="text-sm text-gray-500 italic mb-4">Assign and track specific items for your projects.</p>
-                        
-                        <form method="GET" class="flex items-center gap-2">
-                            <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Priority Filter:</label>
-                            <select name="priority_filter" onchange="this.form.submit()" 
-                                class="text-xs font-bold border border-slate-200 bg-white rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-sm">
-                                <option value="all" <?php echo $filter == 'all' ? 'selected' : ''; ?>>All</option>
-                                <option value="3" <?php echo $filter == '3' ? 'selected' : ''; ?>>High</option>
-                                <option value="2" <?php echo $filter == '2' ? 'selected' : ''; ?>>Medium</option>
-                                <option value="1" <?php echo $filter == '1' ? 'selected' : ''; ?>>Low</option>
+                        <h1 class="text-4xl font-black text-slate-900 tracking-tight">Active Tasks</h1>
+                        <p class="text-slate-500 font-medium">Viewing <?php echo count($tasks); ?> filtered items.</p>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-4">
+                        <form method="GET" class="flex items-center gap-3 bg-white p-2 rounded-2xl border border-slate-100 shadow-sm">
+                            <div class="pl-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Filter By:</div>
+                            
+                            <input type="hidden" name="priority_filter" value="<?php echo htmlspecialchars($priority_filter); ?>">
+
+                            <select name="user_filter" onchange="this.form.submit()" 
+                                    class="bg-slate-50 border-none text-xs font-bold text-slate-600 rounded-xl focus:ring-0 cursor-pointer py-2 px-4">
+                                <option value="all">All Users</option>
+                                <?php foreach ($users as $u): ?>
+                                    <option value="<?php echo $u['id']; ?>" <?php echo ($user_filter == $u['id']) ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($u['username']); ?>
+                                    </option>
+                                <?php endforeach; ?>
                             </select>
                         </form>
-                    </div>
-                    
-                    <div class="flex items-center gap-3">
-                        <a href="modules/task_module.php?action=clear_completed" 
-                            onclick="return confirm('Permanently delete ALL completed tasks?')"
-                            class="px-5 py-2.5 rounded-xl font-bold text-red-500 hover:bg-red-50 border border-transparent hover:border-red-100 transition flex items-center gap-2 text-sm">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                            Clear Completed
-                        </a>
 
-                        <button @click="openTaskModal = true" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-blue-100 transition flex items-center gap-2">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-                            Add New Task
+                        <button @click="isEdit = false; formData = { id: '', title: '', project_id: '', priority: 2, assigned_to: '' }; openTaskModal = true" 
+                                class="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold shadow-xl hover:bg-indigo-700 transition-all active:scale-95">
+                            + New Task
                         </button>
                     </div>
                 </div>
 
-                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                <div class="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
                     <table class="w-full text-left border-collapse">
-                        <thead class="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
+                        <thead class="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b">
                             <tr>
-                                <th class="px-6 py-5">Status</th>
-                                <th class="px-6 py-5">Task Details</th>
-                                <th class="px-6 py-5">Project</th>
-                                <th class="px-6 py-5">Priority</th>
-                                <th class="px-6 py-5 text-right">Actions</th>
+                                <th class="px-6 py-6 w-20 text-center">Done</th>
+                                <th class="px-6 py-6">Task Description</th>
+                                <th class="px-6 py-6">Project</th>
+                                <th class="px-6 py-6">Assignee</th>
+                                <th class="px-6 py-6 text-center">Priority</th>
+                                <th class="px-6 py-6 text-right">Actions</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-gray-100">
+                        <tbody class="divide-y divide-slate-100">
                             <?php if (empty($tasks)): ?>
-                                <tr><td colspan="5" class="px-6 py-12 text-center text-gray-400 italic">No tasks found. Click "Add New Task" to begin.</td></tr>
+                                <tr><td colspan="6" class="px-6 py-20 text-center text-slate-400 italic">No tasks found for this user.</td></tr>
                             <?php else: foreach ($tasks as $task): ?>
-                                <tr class="hover:bg-slate-50/50 transition-colors group">
-                                    <td class="px-6 py-4">
-                                        <label class="relative inline-flex items-center cursor-pointer">
-                                            <input type="checkbox" class="sr-only peer" <?php echo $task['is_completed'] ? 'checked' : ''; ?>
-                                                   onchange="toggleTaskStatus(<?php echo $task['id']; ?>, this.checked)">
-                                            <div class="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:bg-blue-600 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
-                                        </label>
+                                <tr class="group hover:bg-slate-50/30 transition-colors">
+                                    <td class="px-6 py-4 text-center">
+                                        <button onclick="markAsDone(<?php echo $task['id']; ?>)" 
+                                                class="w-10 h-10 rounded-full border-2 border-slate-200 text-transparent group-hover:border-emerald-500 group-hover:text-emerald-500 hover:!bg-emerald-500 hover:!text-white transition-all flex items-center justify-center">
+                                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3"><path d="M5 13l4 4L19 7" /></svg>
+                                        </button>
                                     </td>
+                                    <td class="px-6 py-4 font-bold text-slate-800 uppercase text-sm"><?php echo htmlspecialchars($task['title']); ?></td>
                                     <td class="px-6 py-4">
-                                        <div class="font-bold text-slate-800 <?php echo $task['is_completed'] ? 'line-through text-gray-400' : ''; ?>" id="task-title-<?php echo $task['id']; ?>">
-                                            <?php echo htmlspecialchars($task['title']); ?>
-                                        </div>
-                                    </td>
-                                    <td class="px-6 py-4">
-                                        <span class="px-2.5 py-1 rounded-md text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                                        <span class="px-3 py-1 rounded-lg bg-indigo-50 text-indigo-600 text-[10px] font-black border border-indigo-100">
                                             <?php echo htmlspecialchars($task['project_name'] ?? 'General'); ?>
                                         </span>
                                     </td>
-                                    <td class="px-6 py-4">
+                                    <td class="px-6 py-4 text-sm font-semibold text-slate-600"><?php echo htmlspecialchars($task['assigned_user'] ?? 'Unassigned'); ?></td>
+                                    <td class="px-6 py-4 text-center">
                                         <?php 
-                                            $pColors = [3 => 'bg-red-100 text-red-700', 2 => 'bg-amber-100 text-amber-700', 1 => 'bg-emerald-100 text-emerald-700'];
-                                            $pLabels = [3 => 'High', 2 => 'Medium', 1 => 'Low'];
-                                            $p = $task['priority'];
+                                            $p = (int)$task['priority'];
+                                            $pColors = [3 => 'bg-red-50 text-red-600', 2 => 'bg-amber-50 text-amber-600', 1 => 'bg-emerald-50 text-emerald-600'];
+                                            $pLabels = [3 => 'HIGH', 2 => 'MED', 1 => 'LOW'];
                                         ?>
-                                        <span class="px-2 py-1 rounded-md text-[10px] font-black uppercase <?php echo $pColors[$p] ?? 'bg-gray-100'; ?>">
-                                            <?php echo $pLabels[$p] ?? 'N/A'; ?>
+                                        <span class="px-3 py-1 rounded-full text-[10px] font-black <?php echo $pColors[$p] ?? 'bg-slate-100'; ?>">
+                                            <?php echo $pLabels[$p] ?? 'MED'; ?>
                                         </span>
                                     </td>
                                     <td class="px-6 py-4 text-right">
-                                        <a href="modules/task_module.php?action=delete&id=<?php echo $task['id']; ?>" 
-                                           onclick="return confirm('Remove task?')"
-                                           class="text-red-400 hover:text-red-600 text-xs font-black uppercase transition opacity-0 group-hover:opacity-100">
-                                            Delete
-                                        </a>
+                                        <div class="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button @click="
+                                                isEdit = true;
+                                                formData = { 
+                                                    id: '<?php echo $task['id']; ?>', 
+                                                    title: '<?php echo addslashes($task['title']); ?>', 
+                                                    project_id: '<?php echo $task['project_id']; ?>', 
+                                                    priority: '<?php echo $task['priority']; ?>',
+                                                    assigned_to: '<?php echo $task['assigned_to']; ?>'
+                                                };
+                                                openTaskModal = true;
+                                            " class="p-2 text-slate-400 hover:text-indigo-600">
+                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                            </button>
+                                            <a href="modules/task_module.php?action=delete&id=<?php echo $task['id']; ?>" 
+                                               onclick="return confirm('Delete this task?')"
+                                               class="p-2 text-slate-400 hover:text-red-500">
+                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                            </a>
+                                        </div>
                                     </td>
                                 </tr>
                             <?php endforeach; endif; ?>
@@ -170,64 +173,18 @@ try {
                 </div>
             </div>
 
-            <div x-show="openTaskModal" class="fixed inset-0 z-50 overflow-y-auto" x-cloak x-transition>
-                <div class="flex items-center justify-center min-h-screen px-4">
-                    <div @click="openTaskModal = false" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
-                    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full z-50 p-8">
-                        <h3 class="text-2xl font-black text-slate-800 mb-6">Create New Task</h3>
-                        <form action="modules/task_module.php" method="POST" class="space-y-5">
-                            <input type="hidden" name="add_task" value="1">
-                            <div>
-                                <label class="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Task Title</label>
-                                <input type="text" name="title" required class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Project</label>
-                                <select name="project_id" required class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
-                                    <option value="" disabled selected>Choose project...</option>
-                                    <?php foreach ($projects as $project): ?>
-                                        <option value="<?php echo $project['id']; ?>"><?php echo htmlspecialchars($project['name']); ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Priority</label>
-                                <select name="priority" class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
-                                    <option value="1">Low</option>
-                                    <option value="2" selected>Medium</option>
-                                    <option value="3">High</option>
-                                </select>
-                            </div>
-                            <div class="flex justify-end gap-3 pt-4">
-                                <button type="button" @click="openTaskModal = false" class="px-6 py-2.5 text-slate-500 font-bold hover:bg-slate-100 rounded-xl">Cancel</button>
-                                <button type="submit" class="px-8 py-2.5 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-200 transition hover:bg-blue-700">Save Task</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            </div>
-
-            <?php include '../includes/footer.php'; ?>
-        </main>
+            </main>
     </div>
 
     <script>
-    function toggleTaskStatus(taskId, isChecked) {
-        const taskTitle = document.getElementById('task-title-' + taskId);
+    function markAsDone(taskId) {
+        if(!confirm('Complete this task?')) return;
+        const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
         fetch('modules/update_task_status.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ task_id: taskId, is_completed: isChecked ? 1 : 0 })
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.success) {
-                isChecked ? taskTitle.classList.add('line-through', 'text-gray-400') : taskTitle.classList.remove('line-through', 'text-gray-400');
-            } else {
-                alert('Error updating task');
-                location.reload(); 
-            }
-        });
+            body: JSON.stringify({ task_id: taskId, is_completed: 1, completed_at: now })
+        }).then(() => window.location.reload());
     }
     </script>
 </body>

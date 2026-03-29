@@ -2,10 +2,6 @@
 node_modules/
 vendor/
 
-# Build outputs (Optional)
-# If you want others to build the CSS themselves, ignore this:
-# public/css/output.css
-
 # Configuration & Secrets
 .env
 config/config.php
