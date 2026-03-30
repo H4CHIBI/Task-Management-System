@@ -2,100 +2,71 @@
 session_start();
 require_once '../../config/config.php';
 
-// Security Check: Only Admins allowed
+// Check for admin role
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'ADMIN') {
     header("Location: ../../index.php?error=unauthorized");
     exit();
 }
 
-/**
- * ACTION: ADD NEW USER
- */
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
-    $username = trim($_POST['username'] ?? '');
-    $password = $_POST['password'] ?? '';
-    $role = $_POST['role'] ?? 'USER';
-    
-    // Default image if upload fails or is empty
-    $image_name = 'default_profile.png'; 
+// 1. ADD USER LOGIC
+if (isset($_POST['add_user'])) {
+    $username = trim($_POST['username']);
+    $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
+    $role = $_POST['role'];
+    $image_name = 'default_profile.png';
 
-    // Handle File Upload logic
-    if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] === 0) {
-        $upload_dir = '../../public/uploads/';
-        
-        // Create directory if it doesn't exist
-        if (!is_dir($upload_dir)) {
-            mkdir($upload_dir, 0777, true);
-        }
-
-        $file_ext = pathinfo($_FILES['profile_image']['name'], PATHINFO_EXTENSION);
-        // Generate unique filename using timestamp to avoid overwriting existing files
-        $image_name = time() . '_' . uniqid() . '.' . $file_ext; 
-        $target_path = $upload_dir . $image_name;
-
-        if (!move_uploaded_file($_FILES['profile_image']['tmp_name'], $target_path)) {
-            // Fallback to default if move fails
-            $image_name = 'default_profile.png';
-        }
+    if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] == 0) {
+        $image_name = time() . '_' . $_FILES['profile_image']['name'];
+        move_uploaded_file($_FILES['profile_image']['tmp_name'], '../../public/uploads/' . $image_name);
     }
 
-    if (!empty($username) && !empty($password)) {
-        try {
-            // Securely hash the password
-            $hashed_password = password_hash($password, PASSWORD_DEFAULT);
-
-            // SQL matches your columns: id (auto), username, password, role, profile_image
-            $sql = "INSERT INTO users_tbl (username, password, role, profile_image) VALUES (?, ?, ?, ?)";
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([$username, $hashed_password, $role, $image_name]);
-
-            header("Location: ../users.php?msg=user_added");
-        } catch (PDOException $e) {
-            // Handle duplicate usernames or DB errors
-            header("Location: ../users.php?error=registration_failed");
-        }
-    } else {
-        header("Location: ../users.php?error=missing_fields");
-    }
+    $stmt = $pdo->prepare("INSERT INTO users_tbl (username, password, role, profile_image) VALUES (?, ?, ?, ?)");
+    $stmt->execute([$username, $password, $role, $image_name]);
+    header("Location: ../manage_users.php?msg=user_added");
     exit();
 }
 
-/**
- * ACTION: DELETE USER
- */
-if (isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['id'])) {
-    $id = (int)$_GET['id'];
+// 2. UPDATE USER LOGIC
+if (isset($_POST['update_user'])) {
+    $id = $_POST['id'];
+    $username = trim($_POST['username']);
+    $role = $_POST['role'];
 
-    // Security: Prevent an admin from deleting their own account
-    if ($id === (int)$_SESSION['user_id']) {
-        header("Location: ../users.php?error=cannot_delete_self");
+    // Update basic info
+    $stmt = $pdo->prepare("UPDATE users_tbl SET username = ?, role = ? WHERE id = ?");
+    $stmt->execute([$username, $role, $id]);
+
+    // Update password if provided
+    if (!empty($_POST['password'])) {
+        $new_pw = password_hash($_POST['password'], PASSWORD_DEFAULT);
+        $stmt = $pdo->prepare("UPDATE users_tbl SET password = ? WHERE id = ?");
+        $stmt->execute([$new_pw, $id]);
+    }
+
+    // Update image if provided
+    if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] == 0) {
+        $image_name = time() . '_' . $_FILES['profile_image']['name'];
+        move_uploaded_file($_FILES['profile_image']['tmp_name'], '../../public/uploads/' . $image_name);
+        $stmt = $pdo->prepare("UPDATE users_tbl SET profile_image = ? WHERE id = ?");
+        $stmt->execute([$image_name, $id]);
+    }
+
+    header("Location: ../manage_users.php?msg=user_updated");
+    exit();
+}
+
+// 3. DELETE USER LOGIC
+if (isset($_GET['action']) && $_GET['action'] == 'delete') {
+    $id = $_GET['id'];
+    
+    // Prevent self-deletion
+    if($id == $_SESSION['user_id']) {
+        header("Location: ../manage_users.php?error=self_delete");
         exit();
     }
 
-    try {
-        // First, optionally get the filename to delete the physical file (housekeeping)
-        $img_stmt = $pdo->prepare("SELECT profile_image FROM users_tbl WHERE id = ?");
-        $img_stmt->execute([$id]);
-        $user_data = $img_stmt->fetch();
-
-        $stmt = $pdo->prepare("DELETE FROM users_tbl WHERE id = ?");
-        $stmt->execute([$id]);
-
-        // Delete the physical image file if it's not the default one
-        if ($user_data && $user_data['profile_image'] !== 'default_profile.png') {
-            $file_to_delete = '../../public/uploads/' . $user_data['profile_image'];
-            if (file_exists($file_to_delete)) {
-                unlink($file_to_delete);
-            }
-        }
-
-        header("Location: ../users.php?msg=user_deleted");
-    } catch (PDOException $e) {
-        header("Location: ../users.php?error=delete_failed");
-    }
+    $stmt = $pdo->prepare("DELETE FROM users_tbl WHERE id = ?");
+    $stmt->execute([$id]);
+    header("Location: ../manage_users.php?msg=user_deleted");
     exit();
 }
-
-// Fallback
-header("Location: ../users.php");
-exit();

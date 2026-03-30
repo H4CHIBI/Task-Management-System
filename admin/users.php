@@ -23,7 +23,11 @@ try {
     <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <style>[x-cloak] { display: none !important; }</style>
 </head>
-<body class="bg-slate-50 antialiased" x-data="{ openUserModal: false }">
+<body class="bg-slate-50 antialiased" x-data="{ 
+    openUserModal: false, 
+    openEditModal: false,
+    editUser: { id: '', username: '', role: '' }
+}">
 
     <div class="flex h-screen overflow-hidden">
         <?php include '../admin/includes/sidebar.php'; ?>
@@ -32,16 +36,6 @@ try {
             <?php include '../admin/includes/header.php'; ?>
 
             <div class="p-8 max-w-7xl mx-auto w-full">
-                
-                <?php if (isset($_GET['msg'])): ?>
-                    <div class="mb-6 p-4 bg-emerald-50 text-emerald-700 rounded-2xl font-bold border border-emerald-100">
-                        <span><?php 
-                            if($_GET['msg'] == 'user_added') echo "✨ New team member joined!";
-                            if($_GET['msg'] == 'user_deleted') echo "🗑️ User account removed.";
-                        ?></span>
-                    </div>
-                <?php endif; ?>
-
                 <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10">
                     <div>
                         <h1 class="text-4xl font-black text-slate-900 tracking-tight">Team Management</h1>
@@ -57,13 +51,6 @@ try {
 
                 <div class="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
                     <table class="w-full text-left border-collapse">
-                        <thead class="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b">
-                            <tr>
-                                <th class="px-6 py-6">User Details</th>
-                                <th class="px-6 py-6">Access Role</th>
-                                <th class="px-6 py-6 text-right">Actions</th>
-                            </tr>
-                        </thead>
                         <tbody class="divide-y divide-slate-100">
                             <?php foreach ($users as $user): ?>
                                 <tr class="group hover:bg-slate-50/30 transition-colors">
@@ -84,15 +71,18 @@ try {
                                             <?php echo $user['role']; ?>
                                         </span>
                                     </td>
-                                    <td class="px-6 py-4 text-right">
+                                    <td class="px-6 py-4 text-right space-x-2">
+                                        <button @click="openEditModal = true; editUser = { id: '<?php echo $user['id']; ?>', username: '<?php echo htmlspecialchars($user['username']); ?>', role: '<?php echo $user['role']; ?>' }"
+                                                class="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-blue-600 transition-all p-2 inline-block">
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                                        </button>
+
                                         <?php if($user['id'] != $_SESSION['user_id']): ?>
                                             <a href="modules/user_module.php?action=delete&id=<?php echo $user['id']; ?>" 
                                                onclick="return confirm('Permanently remove this user?')"
                                                class="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all p-2 inline-block">
                                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                                             </a>
-                                        <?php else: ?>
-                                            <span class="text-[10px] font-black text-blue-500 italic bg-blue-50 px-2 py-1 rounded-md">Current Admin</span>
                                         <?php endif; ?>
                                     </td>
                                 </tr>
@@ -107,32 +97,81 @@ try {
                     <div @click="openUserModal = false" class="fixed inset-0 bg-slate-900/70 backdrop-blur-md"></div>
                     <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full z-50 p-10 relative overflow-hidden">
                         <h3 class="text-3xl font-black text-slate-900 mb-8">Register User</h3>
-                        <form action="modules/user_module.php" method="POST" enctype="multipart/form-data" class="space-y-6">
+                        <form action="modules/user_module.php" method="POST" enctype="multipart/form-data" class="space-y-6"
+                              x-data="{ p1: '', p2: '' }" @submit="if(p1 !== p2) { alert('Passwords do not match!'); $event.preventDefault(); }">
                             <input type="hidden" name="add_user" value="1">
                             <div>
-                                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Username</label>
-                                <input type="text" name="username" required class="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none">
-                            </div>
-                            <div>
-                                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Password</label>
-                                <input type="password" name="password" required class="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none">
+                                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Username</label>
+                                <input type="text" name="username" required class="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-blue-500 font-bold">
                             </div>
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Role</label>
-                                    <select name="role" class="w-full px-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-bold">
+                                    <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Password</label>
+                                    <input type="password" name="password" x-model="p1" required class="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-blue-500 font-bold">
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Confirm</label>
+                                    <input type="password" x-model="p2" required class="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-blue-500 font-bold">
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Role</label>
+                                    <select name="role" class="w-full px-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-black text-xs">
                                         <option value="USER">User</option>
                                         <option value="ADMIN">Admin</option>
                                     </select>
                                 </div>
                                 <div>
-                                    <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Photo</label>
-                                    <input type="file" name="profile_image" accept="image/*" class="w-full text-xs">
+                                    <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Photo</label>
+                                    <input type="file" name="profile_image" accept="image/*" class="w-full text-[10px] font-bold text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:bg-blue-50 file:text-blue-600">
                                 </div>
                             </div>
                             <div class="flex justify-end gap-4 pt-4">
-                                <button type="button" @click="openUserModal = false" class="px-6 py-3 font-bold">Discard</button>
-                                <button type="submit" class="px-10 py-3 bg-blue-600 text-white font-black rounded-2xl">Save</button>
+                                <button type="button" @click="openUserModal = false" class="px-6 py-3 font-bold text-slate-400 text-sm">Discard</button>
+                                <button type="submit" class="px-10 py-3 bg-blue-600 text-white font-black rounded-2xl shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all">Save Member</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div x-show="openEditModal" class="fixed inset-0 z-50 overflow-y-auto" x-cloak x-transition>
+                <div class="flex items-center justify-center min-h-screen px-4">
+                    <div @click="openEditModal = false" class="fixed inset-0 bg-slate-900/70 backdrop-blur-md"></div>
+                    <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full z-50 p-10 relative">
+                        <h3 class="text-3xl font-black text-slate-900 mb-8">Update Member</h3>
+                        <form action="modules/user_module.php" method="POST" enctype="multipart/form-data" class="space-y-6">
+                            <input type="hidden" name="update_user" value="1">
+                            <input type="hidden" name="id" x-model="editUser.id">
+                            
+                            <div>
+                                <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Username</label>
+                                <input type="text" name="username" x-model="editUser.username" required class="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-bold">
+                            </div>
+                            
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Change Role</label>
+                                    <select name="role" x-model="editUser.role" class="w-full px-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-black text-xs">
+                                        <option value="USER">User</option>
+                                        <option value="ADMIN">Admin</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">New Photo</label>
+                                    <input type="file" name="profile_image" accept="image/*" class="w-full text-[10px] font-bold text-slate-400">
+                                </div>
+                            </div>
+
+                            <div class="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                <label class="block text-[10px] font-black text-blue-600 uppercase tracking-widest mb-2 px-1">Security</label>
+                                <input type="password" name="password" placeholder="New Password (optional)" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none text-sm font-bold">
+                            </div>
+
+                            <div class="flex justify-end gap-4 pt-4">
+                                <button type="button" @click="openEditModal = false" class="px-6 py-3 font-bold text-slate-400 text-sm">Cancel</button>
+                                <button type="submit" class="px-10 py-3 bg-slate-900 text-white font-black rounded-2xl hover:bg-blue-600 transition-all">Update Access</button>
                             </div>
                         </form>
                     </div>

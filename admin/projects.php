@@ -6,21 +6,39 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'ADMIN') {
 }
 require_once '../config/config.php';
 
-// NEW: Get the status filter from the URL (default to 'ONGOING')
-$status_filter = $_GET['status_filter'] ?? 'ONGOING';
+// --- PAGINATION SETTINGS ---
+$limit = 6; 
+$page = isset($_GET['page']) ? (int)$_GET['page'] : 1; // Fixed typo here: $_GET
+$page = max(1, $page);
+$offset = ($page - 1) * $limit;
+
+// --- FILTER SETTINGS ---
+$status_filter = $_GET['status_filter'] ?? 'ONGOING'; // Fixed typo here: $_GET
 
 try {
-    // UPDATED: Added WHERE clause to filter by status
+    // 1. Get total count for pagination based on the filter
+    $count_stmt = $pdo->prepare("SELECT COUNT(*) FROM project_tbl WHERE status = :status");
+    $count_stmt->execute(['status' => $status_filter]);
+    $total_projects = $count_stmt->fetchColumn();
+    $total_pages = ceil($total_projects / $limit);
+    $total_pages = max(1, $total_pages); // Ensure at least 1 page exists
+
+    // 2. Fetch projects with LIMIT and OFFSET
     $query = "SELECT p.*, 
               (SELECT COUNT(*) FROM task_tbl t WHERE t.project_id = p.id) as total_tasks,
               (SELECT COUNT(*) FROM task_tbl t WHERE t.project_id = p.id AND t.is_completed = 1) as completed_tasks
               FROM project_tbl p 
               WHERE p.status = :status
-              ORDER BY p.id DESC";
+              ORDER BY p.id DESC
+              LIMIT :limit OFFSET :offset";
               
     $stmt = $pdo->prepare($query);
-    $stmt->execute(['status' => $status_filter]);
+    $stmt->bindValue(':status', $status_filter, PDO::PARAM_STR);
+    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+    $stmt->execute();
     $projects = $stmt->fetchAll();
+
 } catch (PDOException $e) {
     die("Error: " . $e->getMessage());
 }
@@ -143,9 +161,37 @@ try {
                         </div>
                     <?php endforeach; endif; ?>
                 </div>
-            </div>
 
-            ... 
+                <?php if ($total_pages > 1): ?>
+                <div class="mt-12 flex flex-col md:flex-row items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                    <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        Showing page <span class="text-slate-900"><?php echo $page; ?></span> of <?php echo $total_pages; ?> 
+                        <span class="ml-2 opacity-50">(<?php echo $total_projects; ?> Total Projects)</span>
+                    </p>
+
+                    <div class="flex items-center gap-2">
+                        <?php $filter_param = "&status_filter=" . urlencode($status_filter); ?>
+                        
+                        <a href="?page=<?php echo max(1, $page - 1) . $filter_param; ?>" 
+                           class="p-2.5 rounded-xl border border-slate-200 transition-all <?php echo $page <= 1 ? 'opacity-30 pointer-events-none' : 'hover:border-indigo-600 hover:text-indigo-600 bg-white shadow-sm'; ?>">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="3" d="M15 19l-7-7 7-7"/></svg>
+                        </a>
+
+                        <?php for($i = 1; $i <= $total_pages; $i++): ?>
+                            <a href="?page=<?php echo $i . $filter_param; ?>" 
+                               class="w-11 h-11 flex items-center justify-center rounded-xl text-xs font-black transition-all <?php echo ($i == $page) ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'bg-white border border-slate-200 text-slate-400 hover:border-indigo-500 hover:text-indigo-600'; ?>">
+                                <?php echo $i; ?>
+                            </a>
+                        <?php endfor; ?>
+
+                        <a href="?page=<?php echo min($total_pages, $page + 1) . $filter_param; ?>" 
+                           class="p-2.5 rounded-xl border border-slate-200 transition-all <?php echo $page >= $total_pages ? 'opacity-30 pointer-events-none' : 'hover:border-indigo-600 hover:text-indigo-600 bg-white shadow-sm'; ?>">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="3" d="M9 5l7 7-7 7"/></svg>
+                        </a>
+                    </div>
+                </div>
+                <?php endif; ?>
+            </div>
 
             <?php include '../admin/includes/footer.php'; ?>
         </main>

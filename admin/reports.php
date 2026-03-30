@@ -6,54 +6,69 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'ADMIN') {
 }
 require_once '../config/config.php';
 
-// 1. Fetch Users - Using 'username' based on your screenshot
-// Also fetching ADMINs just in case you assigned tasks to yourself
-$user_stmt = $pdo->query("SELECT id, username FROM users_tbl ORDER BY username ASC");
-$all_users = $user_stmt->fetchAll();
+// --- PAGINATION SETTINGS ---
+$limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 10;
+$limit = in_array($limit, [5, 10, 20, 50]) ? $limit : 10;
+$page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+$page = max(1, $page);
+$offset = ($page - 1) * $limit;
 
-// 2. Capture all Filter Inputs
+// --- FILTERS ---
 $start_date = $_GET['start_date'] ?? '';
 $end_date   = $_GET['end_date'] ?? '';
 $status_val = $_GET['status'] ?? 'all';
 $user_id    = $_GET['user_id'] ?? 'all';
 
 try {
-    $params = [];
-    $filters = "";
+    // 1. Fetch Users for the dropdown
+    $user_stmt = $pdo->query("SELECT id, username FROM users_tbl ORDER BY username ASC");
+    $all_users = $user_stmt->fetchAll();
 
-    // Date Filtering (Using created_at - check if this column exists in task_tbl)
+    // 2. Build Filter SQL for Tasks
+    $task_filters = "";
+    $params = [];
+
     if (!empty($start_date) && !empty($end_date)) {
-        $filters .= " AND t.created_at BETWEEN :start AND :end ";
+        $task_filters .= " AND t.created_at BETWEEN :start AND :end ";
         $params[':start'] = $start_date . " 00:00:00";
         $params[':end']   = $end_date . " 23:59:59";
     }
 
-    // Status Filtering
     if ($status_val === 'completed') {
-        $filters .= " AND t.is_completed = 1 ";
+        $task_filters .= " AND t.is_completed = 1 ";
     } elseif ($status_val === 'pending') {
-        $filters .= " AND t.is_completed = 0 ";
+        $task_filters .= " AND t.is_completed = 0 ";
     }
 
-    // User Filtering
     if ($user_id !== 'all') {
-        $filters .= " AND t.assigned_to = :user_id ";
+        $task_filters .= " AND t.assigned_to = :user_id ";
         $params[':user_id'] = $user_id;
     }
 
-    // 3. Main Analytics Query
+    // 3. Get Total Project Count for Pagination
+    $total_projects = $pdo->query("SELECT COUNT(*) FROM project_tbl")->fetchColumn();
+    $total_pages = ceil($total_projects / $limit);
+
+    // 4. Main Analytics Query with JOINs
+    // We count tasks per project based on the applied filters
     $query = "SELECT 
                 p.name as project_name,
                 COUNT(t.id) as total_tasks,
                 SUM(CASE WHEN t.is_completed = 1 THEN 1 ELSE 0 END) as completed_count,
                 SUM(CASE WHEN t.is_completed = 0 THEN 1 ELSE 0 END) as pending_count
               FROM project_tbl p
-              LEFT JOIN task_tbl t ON p.id = t.project_id $filters
+              LEFT JOIN task_tbl t ON p.id = t.project_id $task_filters
               GROUP BY p.id
-              ORDER BY p.name ASC";
+              ORDER BY p.name ASC
+              LIMIT :limit OFFSET :offset";
     
     $stmt = $pdo->prepare($query);
-    $stmt->execute($params);
+    foreach ($params as $key => $val) {
+        $stmt->bindValue($key, $val);
+    }
+    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+    $stmt->execute();
     $reports = $stmt->fetchAll();
 
 } catch (PDOException $e) {
@@ -80,29 +95,28 @@ try {
                 <div class="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
                     <div>
                         <h1 class="text-4xl font-black text-slate-900 tracking-tight">System Analytics</h1>
-                        <p class="text-slate-500 font-medium italic">Filter project performance by date, status, or member.</p>
+                        <p class="text-slate-500 font-medium italic">Project performance data based on current assignments.</p>
                     </div>
 
                     <a href="modules/export_reports.php?<?php echo http_build_query($_GET); ?>" 
                        class="inline-flex items-center gap-2 bg-slate-900 hover:bg-black text-white px-6 py-3.5 rounded-2xl font-bold shadow-xl transition-all active:scale-95">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                         Download PDF Report
                     </a>
                 </div>
 
                 <div class="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm mb-10">
                     <form method="GET" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 items-end">
+                        <input type="hidden" name="limit" value="<?php echo $limit; ?>">
                         
                         <div class="space-y-2">
                             <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">From Date</label>
-                            <input type="date" name="start_date" value="<?php echo $start_date; ?>" 
-                                   class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none">
+                            <input type="date" name="start_date" value="<?php echo $start_date; ?>" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none">
                         </div>
 
                         <div class="space-y-2">
                             <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">To Date</label>
-                            <input type="date" name="end_date" value="<?php echo $end_date; ?>" 
-                                   class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none">
+                            <input type="date" name="end_date" value="<?php echo $end_date; ?>" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none">
                         </div>
 
                         <div class="space-y-2">
@@ -142,37 +156,53 @@ try {
                                 <th class="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Project Name</th>
                                 <th class="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Volume</th>
                                 <th class="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Status Mix</th>
-                                <th class="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Efficiency</th>
                                 <th class="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Progress</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-50">
                             <?php if (empty($reports)): ?>
-                                <tr><td colspan="5" class="px-8 py-16 text-center text-slate-400 font-medium italic">No data matching your current filters.</td></tr>
+                                <tr><td colspan="4" class="px-8 py-16 text-center text-slate-400 font-medium italic">No data matching your current filters.</td></tr>
                             <?php else: foreach ($reports as $row): 
                                 $total = $row['total_tasks'];
                                 $done = $row['completed_count'];
                                 $percent = ($total > 0) ? round(($done / $total) * 100) : 0;
                             ?>
                             <tr class="hover:bg-slate-50/50 transition-colors">
-                                <td class="px-8 py-6 font-bold text-slate-800"><?php echo htmlspecialchars($row['project_name']); ?></td>
-                                <td class="px-8 py-6 text-center font-bold text-slate-500"><?php echo $total; ?></td>
+                                <td class="px-8 py-6 font-bold text-slate-800 uppercase text-xs"><?php echo htmlspecialchars($row['project_name']); ?></td>
+                                <td class="px-8 py-6 text-center font-black text-slate-500"><?php echo $total; ?></td>
                                 <td class="px-8 py-6">
                                     <div class="flex justify-center gap-2">
-                                        <span class="bg-emerald-50 text-emerald-600 px-2 py-1 rounded text-[10px] font-black border border-emerald-100">Done: <?php echo $done; ?></span>
-                                        <span class="bg-amber-50 text-amber-600 px-2 py-1 rounded text-[10px] font-black border border-amber-100">Left: <?php echo $row['pending_count']; ?></span>
+                                        <span class="bg-emerald-50 text-emerald-600 px-2 py-1 rounded text-[10px] font-black border border-emerald-100">DONE: <?php echo $done; ?></span>
+                                        <span class="bg-amber-50 text-amber-600 px-2 py-1 rounded text-[10px] font-black border border-amber-100">LEFT: <?php echo $row['pending_count']; ?></span>
                                     </div>
                                 </td>
-                                <td class="px-8 py-6 w-64">
-                                    <div class="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                                        <div class="bg-blue-600 h-full rounded-full transition-all duration-1000" style="width: <?php echo $percent; ?>%"></div>
+                                <td class="px-8 py-6 text-right">
+                                    <div class="flex items-center justify-end gap-3">
+                                        <div class="h-1.5 w-24 bg-slate-100 rounded-full overflow-hidden">
+                                            <div class="bg-blue-600 h-full rounded-full" style="width: <?php echo $percent; ?>%"></div>
+                                        </div>
+                                        <span class="font-black text-slate-700 text-xs w-8"><?php echo $percent; ?>%</span>
                                     </div>
                                 </td>
-                                <td class="px-8 py-6 text-right font-black text-slate-700"><?php echo $percent; ?>%</td>
                             </tr>
                             <?php endforeach; endif; ?>
                         </tbody>
                     </table>
+
+                    <?php if ($total_pages > 1): ?>
+                    <div class="px-8 py-4 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between">
+                        <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Page <?php echo $page; ?> of <?php echo $total_pages; ?></span>
+                        <div class="flex gap-2">
+                            <?php $base_url = "?" . http_build_query(array_merge($_GET, ['page' => ''])); ?>
+                            <a href="<?php echo $base_url . max(1, $page-1); ?>" class="p-2 bg-white border rounded-xl <?php echo $page <= 1 ? 'opacity-30 pointer-events-none' : 'hover:border-blue-500 shadow-sm'; ?>">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="3" d="M15 19l-7-7 7-7"/></svg>
+                            </a>
+                            <a href="<?php echo $base_url . min($total_pages, $page+1); ?>" class="p-2 bg-white border rounded-xl <?php echo $page >= $total_pages ? 'opacity-30 pointer-events-none' : 'hover:border-blue-500 shadow-sm'; ?>">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="3" d="M9 5l7 7-7 7"/></svg>
+                            </a>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 </div>
             </div>
 
