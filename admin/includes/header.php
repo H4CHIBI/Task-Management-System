@@ -52,13 +52,6 @@
                         Personal Profile
                     </a>
 
-                    <a href="settings.php" class="flex items-center gap-3 px-5 py-3 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-blue-600 transition-all">
-                        <div class="bg-slate-50 p-1.5 rounded-lg text-slate-400 group-hover:text-blue-600">
-                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066" stroke-width="2.5"/></svg>
-                        </div>
-                        Security Settings
-                    </a>
-
                     <div class="mx-4 my-2 border-t border-slate-100"></div>
                     
                     <a href="../auth/logout.php" class="flex items-center gap-3 px-5 py-3 text-xs font-extrabold text-red-500 hover:bg-red-50 transition-all rounded-b-2xl">
