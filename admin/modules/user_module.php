@@ -22,7 +22,8 @@ if (isset($_POST['add_user'])) {
 
     $stmt = $pdo->prepare("INSERT INTO users_tbl (username, password, role, profile_image) VALUES (?, ?, ?, ?)");
     $stmt->execute([$username, $password, $role, $image_name]);
-    header("Location: ../manage_users.php?msg=user_added");
+    // FIXED REDIRECT
+    header("Location: ../users.php?msg=user_added");
     exit();
 }
 
@@ -46,12 +47,14 @@ if (isset($_POST['update_user'])) {
     // Update image if provided
     if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] == 0) {
         $image_name = time() . '_' . $_FILES['profile_image']['name'];
-        move_uploaded_file($_FILES['profile_image']['tmp_name'], '../../public/uploads/' . $image_name);
-        $stmt = $pdo->prepare("UPDATE users_tbl SET profile_image = ? WHERE id = ?");
-        $stmt->execute([$image_name, $id]);
+        if(move_uploaded_file($_FILES['profile_image']['tmp_name'], '../../public/uploads/' . $image_name)) {
+            $stmt = $pdo->prepare("UPDATE users_tbl SET profile_image = ? WHERE id = ?");
+            $stmt->execute([$image_name, $id]);
+        }
     }
 
-    header("Location: ../manage_users.php?msg=user_updated");
+    // FIXED REDIRECT
+    header("Location: ../users.php?msg=user_updated");
     exit();
 }
 
@@ -61,12 +64,13 @@ if (isset($_GET['action']) && $_GET['action'] == 'delete') {
     
     // Prevent self-deletion
     if($id == $_SESSION['user_id']) {
-        header("Location: ../manage_users.php?error=self_delete");
+        header("Location: ../users.php?error=self_delete");
         exit();
     }
 
     $stmt = $pdo->prepare("DELETE FROM users_tbl WHERE id = ?");
     $stmt->execute([$id]);
-    header("Location: ../manage_users.php?msg=user_deleted");
+    // FIXED REDIRECT
+    header("Location: ../users.php?msg=user_deleted");
     exit();
 }

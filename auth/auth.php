@@ -1,11 +1,10 @@
 <?php
 session_start();
-
 require_once '../config/config.php'; 
 
 if($_SERVER['REQUEST_METHOD'] === 'POST'){
     $username = trim($_POST['username'] ?? '');
-    $password = trim($_POST['password']) ?? '';
+    $password = $_POST['password'] ?? ''; // Removed trim for passwords as spaces can be part of a pass
 
     if(empty($username) || empty($password)){
         header("Location: ../index.php?error=empty_fields");
@@ -13,7 +12,8 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
     }
 
     try {
-        $stmt = $pdo->prepare("SELECT id, username, password, role FROM users_tbl WHERE username = ? LIMIT 1");
+        // Added profile_image to the SELECT so it's available for the session
+        $stmt = $pdo->prepare("SELECT id, username, password, role, profile_image FROM users_tbl WHERE username = ? LIMIT 1");
         $stmt->execute([$username]);
         $user = $stmt->fetch();
 
@@ -25,10 +25,17 @@ if($_SERVER['REQUEST_METHOD'] === 'POST'){
             $_SESSION['role'] = $user['role'];
             $_SESSION['profile_image'] = $user['profile_image'] ?? 'default_profile.png';
 
-            // 2. Redirect path (assuming dashboard is in public/admin/)
-            header("Location: ../admin/dashboard.php");
+            // --- ROLE-BASED REDIRECTION ---
+            if ($_SESSION['role'] === 'ADMIN') {
+                header("Location: ../admin/dashboard.php");
+            } else {
+                // Change this to your actual user-facing page
+                header("Location: ../user/user_dashboard.php"); 
+            }
             exit();
+
         } else {
+            // Generic error for security (don't tell them if it was the user or pass that was wrong)
             header("Location: ../index.php?error=invalid_credentials");
             exit();
         }

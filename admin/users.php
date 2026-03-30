@@ -6,10 +6,18 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'ADMIN') {
 }
 require_once '../config/config.php';
 
+// --- PAGINATION & LIMIT LOGIC ---
+$limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 10; 
+$limit = in_array($limit, [5, 10, 20, 50]) ? $limit : 10; 
+
 try {
-    // Removed created_at from the query to match your actual database schema
-    $stmt = $pdo->query("SELECT id, username, role, profile_image FROM users_tbl ORDER BY id DESC");
+    // Fetch users with the selected limit
+    $stmt = $pdo->prepare("SELECT id, username, role, profile_image FROM users_tbl ORDER BY id DESC LIMIT :limit");
+    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmt->execute();
     $users = $stmt->fetchAll();
+    
+    $total_users = $pdo->query("SELECT COUNT(*) FROM users_tbl")->fetchColumn();
 } catch (PDOException $e) {
     die("Database Error: " . $e->getMessage());
 }
@@ -36,21 +44,57 @@ try {
             <?php include '../admin/includes/header.php'; ?>
 
             <div class="p-8 max-w-7xl mx-auto w-full">
-                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10">
+                
+                <?php if (isset($_GET['msg'])): ?>
+                    <div class="mb-6 p-4 rounded-2xl border font-bold text-sm flex items-center gap-3 animate-pulse bg-emerald-50 border-emerald-100 text-emerald-600">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                        <?php 
+                            if($_GET['msg'] == 'user_updated') echo "Account updated successfully!";
+                            if($_GET['msg'] == 'user_added') echo "New team member registered!";
+                            if($_GET['msg'] == 'user_deleted') echo "User has been removed.";
+                        ?>
+                    </div>
+                <?php endif; ?>
+
+                <?php if (isset($_GET['error']) && $_GET['error'] == 'self_delete'): ?>
+                    <div class="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-100 text-amber-600 font-bold text-sm flex items-center gap-3">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                        Security Alert: You cannot delete your own account!
+                    </div>
+                <?php endif; ?>
+
+                <div class="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
                     <div>
                         <h1 class="text-4xl font-black text-slate-900 tracking-tight">Team Management</h1>
-                        <p class="text-slate-500 font-medium">Currently managing <span class="text-blue-600 font-bold"><?php echo count($users); ?></span> accounts.</p>
+                        <p class="text-slate-500 font-medium">Currently managing <span class="text-blue-600 font-bold"><?php echo $total_users; ?></span> accounts.</p>
                     </div>
-                    
-                    <button @click="openUserModal = true" 
-                            class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-2xl font-bold shadow-xl shadow-blue-100 transition-all active:scale-95 flex items-center gap-2">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>
-                        Add New User
-                    </button>
+
+                    <div class="flex items-center gap-4">
+                        <form method="GET" class="flex items-center gap-3 bg-white p-2 rounded-2xl border border-slate-100 shadow-sm">
+                            <select name="limit" onchange="this.form.submit()" class="bg-transparent border-none text-xs font-bold text-slate-600 focus:ring-0 cursor-pointer">
+                                <?php foreach([5, 10, 20, 50] as $opt): ?>
+                                    <option value="<?php echo $opt; ?>" <?php echo ($limit == $opt) ? 'selected' : ''; ?>><?php echo $opt; ?> Rows</option>
+                                <?php endforeach; ?>
+                            </select>
+                        </form>
+
+                        <button @click="openUserModal = true" 
+                                class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-2xl font-bold shadow-xl shadow-blue-100 transition-all active:scale-95 flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>
+                            Add Member
+                        </button>
+                    </div>
                 </div>
 
                 <div class="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
                     <table class="w-full text-left border-collapse">
+                        <thead class="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b">
+                            <tr>
+                                <th class="px-6 py-4">User Details</th>
+                                <th class="px-6 py-4">Role Access</th>
+                                <th class="px-6 py-4 text-right">Actions</th>
+                            </tr>
+                        </thead>
                         <tbody class="divide-y divide-slate-100">
                             <?php foreach ($users as $user): ?>
                                 <tr class="group hover:bg-slate-50/30 transition-colors">
@@ -124,7 +168,7 @@ try {
                                 </div>
                                 <div>
                                     <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Photo</label>
-                                    <input type="file" name="profile_image" accept="image/*" class="w-full text-[10px] font-bold text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:bg-blue-50 file:text-blue-600">
+                                    <input type="file" name="profile_image" accept="image/*" class="w-full text-[10px] font-bold text-slate-400">
                                 </div>
                             </div>
                             <div class="flex justify-end gap-4 pt-4">
@@ -177,6 +221,7 @@ try {
                     </div>
                 </div>
             </div>
+
         </main>
     </div>
 </body>
